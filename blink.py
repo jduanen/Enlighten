@@ -39,13 +39,13 @@ DEF_CONF_FILE = "./.enphase.yml"
 DEF_LOG_LEVEL = "WARNING"
 DEF_RATE = 4    # default: poll every 15 mins
 
-UPDATE_RATE = 6 * 60 * 60  # Envoy updates server every six hours on Cellular
-UPDATE_RATE = 15 * 60      # Envoy updates server every 15 mins on WiFi
-STATS_RATE = 5 * 60        # stats are sampled in 5 min intervals
+CELLULAR_INTERVAL = 6 * 60 * 60  # Envoy updates server every six hours on Cellular
+WIFI_INTERVAL = 15 * 60          # Envoy updates server every 15 mins on WiFi
+UPDATE_INTERVAL = WIFI_INTERVAL  # using WiFi
+STATS_RATE = 5 * 60              # stats are sampled in 5 min intervals
 
-RETRY_DELAY = 60 * 5       # retry every 5 mins
+RETRY_DELAY = 60 * 5             # retry every 5 mins
 
-#CATCH_SIGNALS = (signal.SIGINT, signal.SIGHUP, signal.SIGILL, signal.SIGTRAP, signal.SIGABRT, signal.SIGKILL)
 #CATCH_SIGNALS = ("INT", "HUP", "ILL", "TRAP", "ABRT", "KILL")
 CATCH_SIGNALS = ("INT",)
 
@@ -106,7 +106,6 @@ class Indicators():
         self.blink.fade_to_color(self.fadeTime, 'red', ledn=1)
 
 
-
 def run(options):
     for s in CATCH_SIGNALS:
         signal.signal(getattr(signal, f"SIG{s}"), signalHandler)
@@ -125,7 +124,7 @@ def run(options):
         while not (current and normal):
             summary = nliten.summary()
             logging.info(f"Summary: power={summary['current_power']}, status={summary['status']}, lastReport={summary['last_report_at']}, lastInterval={summary['last_interval_end_at']}")
-            current = summary['last_report_at'] < time.time() - UPDATE_RATE
+            current = summary['last_report_at'] < time.time() - UPDATE_INTERVAL
             normal = summary['status'] == "normal"
             if not current:
                 leds.staleData()
@@ -143,7 +142,7 @@ def run(options):
         stats = nliten.stats()
         logging.debug(f"Stats: {stats['meta']}")  #### TODO add summary of the data in intervals -- min/max/avg, reporting devices, etc.
         now = time.time()
-        if stats['meta']['last_report_at'] < now - UPDATE_RATE:
+        if stats['meta']['last_report_at'] < now - UPDATE_INTERVAL:
             logging.info(f"Reporting Late: last report={stats['meta']['last_report_at']}, now={now}")
             leds.error()
         elif stats['meta']['status'] != "normal":

@@ -24,13 +24,15 @@ import argparse
 import json
 import logging
 import os
+import signal
 import sys
+from threading import Event
 import time
 
 import yaml
 
 from blink1.blink1 import Blink1
-from enphase import Enlighten
+from Enlighten import Enlighten
 
 
 DEF_CONF_FILE = "./.enphase.yml"
@@ -41,52 +43,119 @@ UPDATE_RATE = 6 * 60 * 60  # Envoy updates server every six hours on Cellular
 UPDATE_RATE = 15 * 60      # Envoy updates server every 15 mins on WiFi
 STATS_RATE = 5 * 60        # stats are sampled in 5 min intervals
 
+RETRY_DELAY = 60 * 5       # retry every 5 mins
+
+#CATCH_SIGNALS = (signal.SIGINT, signal.SIGHUP, signal.SIGILL, signal.SIGTRAP, signal.SIGABRT, signal.SIGKILL)
+#CATCH_SIGNALS = ("INT", "HUP", "ILL", "TRAP", "ABRT", "KILL")
+CATCH_SIGNALS = ("INT",)
+
 #### TODO document this
 
-#### TODO add signal handler and shut down gracefully
+exitLoop = Event()
+
+
+def signalHandler(sig, frame):
+    ''' Catch SIGINT and clean up before exiting
+    '''
+    if sig == signal.SIGINT:
+        logging.info("SIGINT")
+    else:
+        logging.debug("Signal:", sig)
+    exitLoop.set()
+
+
+class Indicators():
+    """Object to encapsulate the Blink1 device.
+      Each visual state of the device is selected by one of this object's methods.
+    """
+    def __init__(self):
+        self.blink = Blink1()
+        self.fadeTime = 100
+        self.blink.fade_to_color(self.fadeTime, 'white')  # startup state
+
+    def __del__(self):
+        self.blink.off()
+        self.blink.close()
+
+    def staleData(self):
+        """Indicate that the summary read from the Enlighten server is stale.
+            I.e., older than the update rate
+        """
+        self.blink.fade_to_color(self.fadeTime, 'black', ledn=1)
+        self.blink.fade_to_color(self.fadeTime, 'red', ledn=2)
+
+    def currentData(self, normal):
+        """Indicate that the summary is current, and further indicate whether it indicates normal operation.
+        """
+        self.blink.fade_to_color(self.fadeTime, 'black', ledn=1)
+        if normal:
+            self.blink.fade_to_color(self.fadeTime, 'green', ledn=2)
+        else:
+            self.blink.fade_to_color(self.fadeTime, 'orange', ledn=2)
+
+    def data(self, output):
+        """Indicate the amount of power currently being generated.
+        """
+        #### FIXME make this run a green pattern that indicates power output
+        self.blink.fade_to_color(self.fadeTime, 'blue', ledn=2)
+
+    def error(self):
+        """Indicate that something went wrong.
+          E.g., stats metadata indicates other than "normal" status
+        """
+        self.blink.fade_to_color(self.fadeTime, 'red', ledn=1)
+
+
 
 def run(options):
-    try:
-        blink = Blink1()
-    except:
-        logging.error("Failed to connect to blink(1) device")
-        sys.exit(1)
+    for s in CATCH_SIGNALS:
+        signal.signal(getattr(signal, f"SIG{s}"), signalHandler)
+
+    leds = Indicators()
     nliten = Enlighten(options['uid'], options['apiKey'], options['sysId'])
     if options['verbose']:
         json.dump(nliten.allSystems, sys.stdout, indent=4)
 
-    summary = nliten.summary()
-    numModules = summary['modules']
-    maxPower = summary['size_w']
-    lastReport = summary['last_report_at']
-    lastInterval = summary['last_interval_end_at']
-    logging.info(f"Summary: numModules={numModules}, maxPower={maxPower}, lastReport={lastReport}, lastInterval={lastInterval}")
-    #### TODO test for late reports, turn on error light and loop until good
-
     pollInterval = (60 * 60) / options['rate']
     pollInterval = 3    #### TMP TMP TMP
-    run = True
-    run = 4    #### TMP TMP TMP
     logging.info(f"Start polling: polling interval={pollInterval} secs")
-    blink.fade_to_color(300, 'chartreuse')
-    while run:
+    while not exitLoop.is_set():
+        current = False
+        normal = False
+        while not (current and normal):
+            summary = nliten.summary()
+            logging.info(f"Summary: power={summary['current_power']}, status={summary['status']}, lastReport={summary['last_report_at']}, lastInterval={summary['last_interval_end_at']}")
+            current = summary['last_report_at'] < time.time() - UPDATE_RATE
+            normal = summary['status'] == "normal"
+            if not current:
+                leds.staleData()
+                logging.debug("Stale Data")
+                continue
+            else:
+                leds.currentData(normal)
+                if normal:
+                    logging.debug("Good Data")
+                    break
+                else:
+                    logging.debug("Abnormal Data")
+            time.sleep(RETRY_DELAY)
+
         stats = nliten.stats()
+        logging.debug(f"Stats: {stats['meta']}")  #### TODO add summary of the data in intervals -- min/max/avg, reporting devices, etc.
         now = time.time()
-        logging.debug(f"Stats: {stats['meta']}")
-        blink.fade_to_color(300, 'yellow')
         if stats['meta']['last_report_at'] < now - UPDATE_RATE:
             logging.info(f"Reporting Late: last report={stats['meta']['last_report_at']}, now={now}")
-            blink.fade_to_color(100, 'orange', ledn=2)
-        if stats['meta']['status'] != "normal":
-            logging.info("")
-            blink.fade_to_color(300, 'red', ledn=1)
+            leds.error()
+        elif stats['meta']['status'] != "normal":
+            logging.info(f"Abnormal Report: {stats['meta']}")
+            leds.error()
+            continue
         else:
-            blink.fade_to_color(300, 'green', ledn=2)
-        time.sleep(pollInterval)
-        run += -1  #### TMP TMP TMP
+            powerOutput = 0  #### FIXME provide power output summary
+            logging.info(f"Power Output: {powerOutput}")
+            leds.data(powerOutput)
+        exitLoop.wait(pollInterval)
     logging.info("Shutting down")
-    blink.off()
-    blink.close()
 
 
 def getOps():

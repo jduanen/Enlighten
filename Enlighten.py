@@ -45,14 +45,14 @@ import time
 
 URL_PREFIX = "https://api.enphaseenergy.com/api/v2/systems"
 
-API_CALLS = ('consumptionStats',
-             'envoys',
-             'inventory',
-             'productionMeters',
-             'rgmStats',
-             'stats',
-             'summary',
-             'system')
+API_CMDS = ('consumptionStats',
+            'envoys',
+            'inventory',
+            'productionMeters',
+            'rgmStats',
+            'stats',
+            'summary',
+            'systems')
 
 #### TODO document this
 

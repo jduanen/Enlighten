@@ -38,6 +38,7 @@ X  - search_system_id
 
 
 import argparse
+from datetime import datetime
 import json
 import logging
 import os
@@ -47,18 +48,20 @@ import time
 
 import yaml
 
-from Enlighten import Enlighten, API_CALLS
+from Enlighten import Enlighten, API_CMDS
 
 
 DEF_CONF_FILE = "./.enphase.yml"
 DEF_LOG_LEVEL = "WARNING"
+DEF_CMDS = ["systems"]
+
+TIME_FORMAT = "%d-%m-%Y %H:%M"  # e.g., "08-02-2021 17:30"
+ESC_TIME_FORMAT = TIME_FORMAT.replace('%', '%%')
 
 
 #### TODO document this
 
 def run(options):
-    options['commands'] = API_CALLS    #### TMP TMP TMP
-    options['start'] = options['end'] = options['day'] = None    #### TMP TMP TMP
     if options['verbose'] > 1:
         json.dump(options, sys.stdout, indent=4)
         print("")
@@ -88,23 +91,27 @@ def getOps():
     usage = f"Usage: {sys.argv[0]} [-v] " + \
              "[-c <confFile>] [-L <logLevel>] [-l <logFile>] " + \
              "[-i] [-b <time>] [-e <time>] [-d <time>]" + \
-             "[-a <apiKey>] [-u <uid>] [-s <sysId>] <call>{,<call'>}*"
+             "[-a <apiKey>] [-u <uid>] [-s <sysId>] [-C <cmd>{,<cmd'>}*]"
     ap = argparse.ArgumentParser()
     ap.add_argument(
         "-a", "--apiKey", action="store", type=str,
         help="Enphase Enlighten Systems API key")
     ap.add_argument(
         "-b", "--beginTime", action="store", type=str,
-        help="Start of time interval of interest (???? format)")
+        help=f"Start of time interval of interest (format={ESC_TIME_FORMAT})")
+    ap.add_argument(
+        "-C", "--cmdsList", action="store", type=str, nargs="+",
+        choices=API_CMDS, default=DEF_CMDS,
+        help="Path to YAML file with configuration information")
     ap.add_argument(
         "-c", "--confFile", action="store", type=str,
         default=DEF_CONF_FILE, help="Path to YAML file with configuration information")
     ap.add_argument(
-        "-d", "--day", action="store", type=str,
-        help="Day of interest (???? format)")
+        "-d", "--dayTime", action="store", type=str,
+        help=f"Day of interest (format={ESC_TIME_FORMAT})")
     ap.add_argument(
         "-e", "--endTime", action="store", type=str,
-        help="End of time interval of interest (???? format")
+        help=f"End of time interval of interest (format={ESC_TIME_FORMAT})")
     ap.add_argument(
         "-i", "--isoFormat", action="store_true", default=False,
         help="Print datetime values in iso8601 format")
@@ -180,14 +187,25 @@ def getOps():
         conf['sysId'] = None
 
     if 'apiKey' not in conf:
-        logging.Error("Must supply API Key")
+        logging.error("Must supply API Key")
         sys.exit(1)
 
     if 'uid' not in conf:
-        logging.Error("Must supply User Id")
+        logging.error("Must supply User Id")
+        sys.exit(1)
+
+    day = int(datetime.strptime(opts.dayTime, TIME_FORMAT).timestamp()) if opts.dayTime else None
+    start = int(datetime.strptime(opts.beginTime, TIME_FORMAT).timestamp()) if opts.beginTime else None
+    end = int(datetime.strptime(opts.endTime, TIME_FORMAT).timestamp()) if opts.endTime else None
+    if start and end and start > end:
+        logging.error(f"Begin time ({opts.beginTime}) must be before End time ({opts.endTime})")
         sys.exit(1)
 
     options = vars(opts)
+    options['day'] = day
+    options['start'] = start
+    options['end'] = end
+    options['commands'] = opts.cmdsList
     options.update(conf)
     return(options)
 

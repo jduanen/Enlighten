@@ -19,6 +19,8 @@ The "Watt" plan allows 10 hits/min and 10,000 hits/month for free.
 N.B. Blink1() uses css3 color names
 """
 
+#### TODO document this
+
 
 import argparse
 import json
@@ -49,7 +51,6 @@ RETRY_DELAY = 60 * 5             # retry every 5 mins
 #CATCH_SIGNALS = ("INT", "HUP", "ILL", "TRAP", "ABRT", "KILL")
 CATCH_SIGNALS = ("INT",)
 
-#### TODO document this
 
 exitLoop = Event()
 

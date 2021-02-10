@@ -65,6 +65,47 @@ def signalHandler(sig, frame):
     exitLoop.set()
 
 
+def pattern1(iters, ramp, duration, onColor, offColor="black", led=1):
+    """????
+    """
+    up = f"{onColor}, {ramp}, {led}"
+    hold = f"{onColor}, {duration}, {led}"
+    down = f"{offColor}, {ramp}, {led}"
+    return f"{int(iters)}, {up}, {hold}, {down}"
+
+
+def pattern2(iters, dutyCycle, period, onColor, offColor="black", ramp=0.25, led=1):
+    """Generate a pattern that alternates between the on and off colors with
+        the given duty cycle.
+
+      N.B. this applies the pattern to a single LED
+
+      The Blink1 pattern is: "<iterations>, {<color>, <rampTime>, <led>}+"
+      This ramps up to the on color, holds at the on color, ramps down to the
+       off color, holds at the off color, and repeats the selected number of
+       times.
+
+      Inputs:
+        iters: integer number of cycles of the pattern to repeat
+        dutyCycle: float between 0.0 and 1.0 that indicates fraction of the
+                    period that should be the on and off colors.  0.0 means
+                    always the min on color, 1.0 is max on color.
+        onColor: string that defines the on color
+        offColor: string that defines the off color
+        ramp: optional float that defines the ramp between colors
+        led: integer that selects which of the two LEDs to which the pattern is applied
+      Returns: string in the Blink1 pattern format
+    """
+    assert dutyCycle >= 0.0 and dutyCycle <= 1.0, f"dutyCycle not between 0.0 and 1.0: {dutyCycle}"
+    t = (dutyCycle * period) - ramp
+    onTime = t if t > 0 else 0.0
+    on = f"{onColor}, {ramp}, {led}, {onColor}, {onTime}, {led}"
+    t = ((1.0 - dutyCycle) * period) - ramp
+    offTime = t if t > 0 else 0.0
+    off = f"{offColor}, {ramp}, {led}, {offColor}, {offTime}, {led}"
+    return f"{int(iters)}, {on}, {off}"
+
+
 class Indicators():
     """Object to encapsulate the Blink1 device.
       Each visual state of the device is selected by one of this object's methods.

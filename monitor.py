@@ -42,7 +42,10 @@ import yaml
 
 from blink1.blink1 import Blink1
 from Enlighten import Enlighten
+from Indicators import Indicators
 
+
+WATCHDOG_INTERVAL = 60 * 1000  # poke watchdog every minute
 
 DEF_CONF_FILE = "./.enphase.yml"
 DEF_LOG_LEVEL = "WARNING"
@@ -81,116 +84,12 @@ def signalHandler(sig, frame):
         logging.debug("Signal:", sig)
     exitLoop.set()
 
-#### TODO think about moving this to the library
-
-def pattern1(iters, ramp, duration, onColor, offColor="black", led=1):
-    """????
-    """
-    up = f"{onColor}, {ramp}, {led}"
-    hold = f"{onColor}, {duration}, {led}"
-    down = f"{offColor}, {ramp}, {led}"
-    return f"{int(iters)}, {up}, {hold}, {down}"
-
-#### TODO think about moving this to the library
-
-def pattern2(iters, dutyCycle, period, onColor, offColor="black", ramp=0.25, led=1):
-    """Generate a pattern that alternates between the on and off colors with
-        the given duty cycle.
-
-      N.B. this applies the pattern to a single LED
-
-      The Blink1 pattern is: "<iterations>, {<color>, <rampTime>, <led>}+"
-      This ramps up to the on color, holds at the on color, ramps down to the
-       off color, holds at the off color, and repeats the selected number of
-       times.
-
-      Inputs:
-        iters: integer number of cycles of the pattern to repeat
-        dutyCycle: float between 0.0 and 1.0 that indicates fraction of the
-                    period that should be the on and off colors.  0.0 means
-                    always the min on color, 1.0 is max on color.
-        onColor: string that defines the on color
-        offColor: string that defines the off color
-        ramp: optional float that defines the ramp between colors
-        led: integer that selects which of the two LEDs to which the pattern is applied
-      Returns: string in the Blink1 pattern format
-    """
-    assert dutyCycle >= 0.0 and dutyCycle <= 1.0, f"dutyCycle not between 0.0 and 1.0: {dutyCycle}"
-    t = (dutyCycle * period) - ramp
-    onTime = t if t > 0 else 0.0
-    on = f"{onColor}, {ramp}, {led}, {onColor}, {onTime}, {led}"
-    t = ((1.0 - dutyCycle) * period) - ramp
-    offTime = t if t > 0 else 0.0
-    off = f"{offColor}, {ramp}, {led}, {offColor}, {offTime}, {led}"
-    return f"{int(iters)}, {on}, {off}"
-
-#### TODO think about moving this to the library
-#### TODO think about making indicator colors/patterns configurable via the config file
-class Indicators():
-    """Object to encapsulate the Blink1 device.
-      Each visual state of the device is selected by one of this object's methods.
-    """
-    def __init__(self):
-        self.blink = Blink1()
-        self.fadeTime = 100
-        self.startPos = 0
-        self.endPos = len(self.blink.read_pattern())
-        self.blink.fade_to_color(self.fadeTime, 'white')  # startup state
-
-    def __del__(self):
-        self.blink.server_tickle(enable=False)
-        self.blink.off()  # exit/off state
-        self.blink.close()
-
-    def setWatchdogPattern(self, pattern):
-        """Set the pattern to use when the device's watchdog isn't reset in
-            time.
-
-          N.B. This does not write the pattern to flash.
-
-          Parameters:
-            pattern: list of four-tuples that represent (r, g, b, msec) and
-                      alternate between LED 0 and 1
-        """
-        self.startPos = 0
-        self.endPos = len(pattern) - 1
-        for i, p in enumerate(pattern):
-            self.blink.write_pattern_line(p[3], p[0:3], i, i % 2)
-
-    def pokeWatchdog(self):
-        self.blink.server_tickle(enable=True,
-                                 timeout_millis=WATCHDOG_INTERVAL,
-                                 start_pos=self.startPos,
-                                 end_pos=self.endPos)
-
-    def staleData(self):
-        """Indicate that the summary read from the Enlighten server is stale.
-            I.e., older than the update rate
-        """
-        self.blink.fade_to_color(self.fadeTime, 'orange', ledn=0)
-
-    def lateReport(self):
-        """Indicate that the stats read from the Enlighten server are older than the update rate
-        """
-        self.blink.fade_to_color(self.fadeTime, 'orange', ledn=1)
-
-    def currentData(self, normal):
-        """Indicate that the summary is current, and further indicate whether it indicates normal operation.
-        """
-        self.blink.fade_to_color(self.fadeTime, 'black', ledn=0)
-
-    def abnormalData(self):
-        """Indicate that something went wrong.
-          E.g., stats metadata indicates other than "normal" status
-        """
-        self.blink.fade_to_color(self.fadeTime, 'red', ledn=0)
-
 
 def run(options):
     for s in CATCH_SIGNALS:
         signal.signal(getattr(signal, f"SIG{s}"), signalHandler)
 
-    leds = Indicators()
+    leds = Indicators(WATCHDOG_INTERVAL)
     nliten = Enlighten(options['uid'], options['apiKey'], options['sysId'])
     if options['verbose']:
         json.dump(nliten.allSystems, sys.stdout, indent=4)
@@ -201,7 +100,7 @@ def run(options):
     while not exitLoop.is_set():
         current = False
         normal = False
-        while not (current and normal):
+        while not (current and normal) and not exitLoop.is_set():
             summary = nliten.summary()
             logging.info(f"Summary: power={summary['current_power']}, status={summary['status']}, lastReport={summary['last_report_at']}, lastInterval={summary['last_interval_end_at']}")
             current = summary['last_report_at'] < time.time() - UPDATE_INTERVAL
@@ -257,7 +156,7 @@ def getOps():
         "-l", "--logFile", action="store", type=str,
         help="Path to location of logfile (create it if it doesn't exist)")
     ap.add_argument(
-        "-r", "--rate", action="store", type=int, choices=range(1, 12),
+        "-r", "--rate", action="store", type=int, choices=range(1, 13),
         default=DEF_INTERVAL,
         help="Interval at which to poll the Enlighten server (number of hours per call)")
     ap.add_argument(
